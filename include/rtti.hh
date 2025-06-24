@@ -209,6 +209,21 @@ namespace RTTI {
             return reinterpret_cast<T const*>(_cast(TypeInfo<T>::Id()));
         }
 
+        template <>
+        [[nodiscard]] void* cast<void>() noexcept {
+            return reinterpret_cast<void*>(const_cast<void*>(_cast(typeId())));
+        }
+
+        template <>
+        [[nodiscard]] void const* cast<void>() const noexcept {
+            return reinterpret_cast<void const*>(_cast(typeId()));
+        }
+
+        template <>
+        [[nodiscard]] void const* cast<const void>() const noexcept {
+            return reinterpret_cast<void const*>(_cast(typeId()));
+        }
+
     protected:
         /**
          * Used to invoke the _dynamic_cast from the most specialized type in the
