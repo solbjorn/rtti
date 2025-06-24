@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <source_location>
 #include <type_traits>
 
 #include "hash.hh"
@@ -36,29 +37,23 @@ namespace RTTI {
     constexpr std::string_view TypeName();
 
     template <>
-    constexpr std::string_view TypeName<void>()
-    { return "void"; }
+    constexpr std::string_view TypeName<const void>()
+    { return "const void"; }
 
     namespace Detail {
         template <typename T>
-        constexpr std::string_view WrappedTypeName()  {
-        #ifdef __clang__
-            return __PRETTY_FUNCTION__;
-        #elif defined(__GNUC__)
-            return __PRETTY_FUNCTION__;
-        #else
-            #error "Unsupported compiler"
-        #endif
+        constexpr std::string_view WrappedTypeName() {
+            return std::source_location::current().function_name();
         }
 
         constexpr std::size_t WrappedTypeNamePrefixLength() {
-            return WrappedTypeName<void>().find(TypeName<void>());
+            return WrappedTypeName<const void>().find(TypeName<const void>());
         }
 
         constexpr std::size_t WrappedTypeNameSuffixLength() {
-            return WrappedTypeName<void>().length()
+            return WrappedTypeName<const void>().length()
                 - WrappedTypeNamePrefixLength()
-                - TypeName<void>().length();
+                - TypeName<const void>().length();
         }
     }
 
@@ -70,6 +65,10 @@ namespace RTTI {
         constexpr auto typeNameLength = wrappedTypeName.length() - prefixLength - suffixLength;
         return wrappedTypeName.substr(prefixLength, typeNameLength);
     }
+
+    // Basic sanity check
+    static_assert(TypeName<void>() == "void");
+    static_assert(TypeName<int>() == "int");
 
     /// TypeId type definition
     using TypeId = std::uint32_t;

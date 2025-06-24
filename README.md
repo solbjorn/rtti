@@ -1,4 +1,4 @@
-# Open-hierarchy custom RTTI framework for C++17 and up.
+# Open-hierarchy custom RTTI framework for C++20 and up.
 
 If you have ever attempted to use the C++'s build in RTTI on a resource constrained (embedded) system you will most likely have noticed it is massively inefficient. Hence this implementation of a hand-rolled form of RTTI which is much more efficient and flexible, although it requires a bit more work from you as a class author. The current implementation supports the following features:
 
