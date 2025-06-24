@@ -76,6 +76,9 @@ namespace RTTI {
     /// Forward declaration of the Enable base.
     struct Enable;
 
+    template<typename This, typename T>
+    concept static_castable = requires(T const* ptr) { static_cast<This const*>(ptr); };
+
     /**
      * Static typeinfo structure for registering types and accessing their information.
      */
@@ -129,10 +132,13 @@ namespace RTTI {
         template <typename T>
         [[nodiscard]] static void const* DynamicCast(TypeId typeId, T const* ptr) noexcept {
             // Check whether the current type matches the requested type.
-            if (Id() == typeId) {
-                // Cast the passed pointer in to the current type and stop
-                // the recursion.
-                return static_cast<This const*>(ptr);
+            if constexpr (static_castable<This, T>)
+            {
+                if (Id() == typeId) {
+                    // Cast the passed pointer in to the current type and stop
+                    // the recursion.
+                    return static_cast<This const*>(ptr);
+                }
             }
 
             // The current type does not match, recursively invoke the method
