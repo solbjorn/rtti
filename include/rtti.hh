@@ -32,6 +32,13 @@
 
 #include "hash.hh"
 
+namespace refl::detail {
+    template <typename T>
+    using type_info = T::TypeInfo;
+}  // namespace refl::detail
+
+#include "refl.hpp"
+
 namespace RTTI {
     template <typename T>
     constexpr std::string_view TypeName();
@@ -66,7 +73,7 @@ namespace RTTI {
         return wrappedTypeName.substr(prefixLength, typeNameLength);
     }
 
-    // Basic sanity check
+    /// Basic sanity check
     static_assert(TypeName<void>() == "void");
     static_assert(TypeName<int>() == "int");
 
@@ -93,6 +100,9 @@ namespace RTTI {
         /// Ensure all passed parent hierarchies have RTTI enabled.
         static_assert((... && std::is_base_of<Enable, Parents>::value),
                       "One or more parent hierarchies is not based on top of RTTI::Enable.");
+
+        /// refl-cpp attributes
+        static constexpr auto attributes { refl::detail::make_attributes<refl::attr::usage::type>(refl_impl::metadata::bases<Parents...>) };
 
         /**
          * Returns the type string of the type T.
@@ -242,6 +252,9 @@ namespace RTTI {
     };
 
     inline Enable::~Enable() = default;
+
+    using refl::type_descriptor;
+    using refl::reflect;
 }  // namespace RTTI
 
 /**
