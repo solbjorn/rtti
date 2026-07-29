@@ -25,13 +25,18 @@
 #ifndef __RTTI_HH
 #define __RTTI_HH
 
-#include <algorithm>
-#include <array>
-#include <cstdint>
-#include <source_location>
 #include <type_traits>
 
-#include "hash.hh"
+#if __has_include(<absl/base/fast_type_id.h>)
+    #include <absl/base/fast_type_id.h>
+
+namespace RTTI {
+    using TypeId = absl::FastTypeIdType;
+    using absl::FastTypeId;
+}  // namespace RTTI
+#else
+    #include "fast_type_id.hh"
+#endif
 
 namespace refl::detail {
     template <typename T>
@@ -41,58 +46,15 @@ namespace refl::detail {
 #include "refl.hpp"
 
 namespace RTTI {
-    template <typename T>
-    constexpr std::string_view TypeName();
-
-    template <>
-    constexpr std::string_view TypeName<const void>()
-    { return "const void"; }
-
-    namespace Detail {
-        template <typename T>
-        constexpr std::string_view WrappedTypeName() {
-            return std::source_location::current().function_name();
-        }
-
-        constexpr std::size_t WrappedTypeNamePrefixLength() {
-            return WrappedTypeName<const void>().find(TypeName<const void>());
-        }
-
-        constexpr std::size_t WrappedTypeNameSuffixLength() {
-            return WrappedTypeName<const void>().length()
-                - WrappedTypeNamePrefixLength()
-                - TypeName<const void>().length();
-        }
-    }
-
-    template <typename T>
-    constexpr std::string_view TypeName() {
-        constexpr auto wrappedTypeName = Detail::WrappedTypeName<T>();
-        constexpr auto prefixLength = Detail::WrappedTypeNamePrefixLength();
-        constexpr auto suffixLength = Detail::WrappedTypeNameSuffixLength();
-        constexpr auto typeNameLength = wrappedTypeName.length() - prefixLength - suffixLength;
-        return wrappedTypeName.substr(prefixLength, typeNameLength);
-    }
-
-    /// Basic sanity check
-    static_assert(TypeName<void>() == "void");
-    static_assert(TypeName<int>() == "int");
-
-    /// TypeId type definition
-    using TypeId = std::uint32_t;
-
     /// Forward declaration of the Enable base.
     struct Enable;
-
-    template<typename This, typename T>
-    concept static_castable = requires(T const* ptr) { static_cast<This const*>(ptr); };
 
     /**
      * Static typeinfo structure for registering types and accessing their information.
      */
     template <typename This, typename... Parents>
     struct TypeInfo {
-        using T = std::remove_const_t<std::remove_reference_t<This>>;
+        using T = std::remove_cvref_t<This>;
 
         /// Ensure all passed parents are basses of this type.
         static_assert((... && std::is_base_of<Parents, This>::value),
@@ -100,26 +62,19 @@ namespace RTTI {
 
         /// Ensure all passed parent hierarchies have RTTI enabled.
         static_assert((... && std::is_base_of<Enable, Parents>::value) ||
-                      (... && !std::is_polymorphic<Parents>::value),
+                          (... && !std::is_polymorphic<Parents>::value),
                       "One or more parent hierarchies is not based on top of RTTI::Enable.");
 
         /// refl-cpp attributes
-        static constexpr auto attributes { refl::detail::make_attributes<refl::attr::usage::type>(refl_impl::metadata::bases<Parents...>) };
-
-        /**
-         * Returns the type string of the type T.
-         * @returns Type string
-         */
-        [[nodiscard]] static constexpr std::string_view Name() noexcept {
-            return TypeName<T>();
-        }
+        static constexpr auto attributes{refl::detail::make_attributes<refl::attr::usage::type>(
+            refl_impl::metadata::bases<Parents...>)};
 
         /**
          * Returns the type identifier of the type T.
          * @returns Type identifier
          */
         [[nodiscard]] static constexpr TypeId Id() noexcept {
-            return Hash::FNV1a(Name());
+            return FastTypeId<T>();
         }
 
         /**
@@ -142,10 +97,10 @@ namespace RTTI {
          * the value returned is a nullptr.
          */
         template <typename T>
-        [[nodiscard]] static void const* DynamicCast(TypeId typeId, T const* ptr) noexcept {
+        [[nodiscard]] static constexpr void const* DynamicCast(TypeId typeId,
+                                                               T const* ptr) noexcept {
             // Check whether the current type matches the requested type.
-            if constexpr (static_castable<This, T>)
-            {
+            if constexpr (requires(T const* ptr) { static_cast<This const*>(ptr); }) {
                 if (Id() == typeId) {
                     // Cast the passed pointer in to the current type and stop
                     // the recursion.
@@ -155,15 +110,12 @@ namespace RTTI {
 
             // The current type does not match, recursively invoke the method
             // for all directly related parent types.
-            std::array<void const*, sizeof...(Parents)> ptrs = {
-                Parents::TypeInfo::DynamicCast(typeId, ptr)...};
+            void const* result{nullptr};
 
-            // Check whether the traversal up the dependency hierarchy returned a pointer
-            // that is not null.
-            auto it = std::find_if(ptrs.begin(), ptrs.end(), [](void const* ptr) {
-                return ptr != nullptr;
-            });
-            return (it != ptrs.end()) ? *it : nullptr;
+            std::ignore =
+                (... || ((result = Parents::TypeInfo::DynamicCast(typeId, ptr)) != nullptr));
+
+            return result;
         }
     };
 
@@ -176,6 +128,7 @@ namespace RTTI {
     struct Enable {
 #endif
         virtual ~Enable() = 0;
+
         Enable& operator=(Enable&&) = delete;
 
         /**
@@ -183,14 +136,6 @@ namespace RTTI {
          * @returns Type identifier
          */
         [[nodiscard]] virtual TypeId typeId() const noexcept = 0;
-
-        /**
-         * Checks whether the object is a direct or derived instance of
-         * the type identified by the passed identifier.
-         * @tparam The identifier to compare with.
-         * @returns True in case a match was found.
-         */
-        [[nodiscard]] virtual bool isById(TypeId typeId) const noexcept = 0;
 
         /**
          * Checks whether the object is an instance of child instance of
@@ -243,6 +188,14 @@ namespace RTTI {
 
     protected:
         /**
+         * Checks whether the object is a direct or derived instance of
+         * the type identified by the passed identifier.
+         * @tparam The identifier to compare with.
+         * @returns True in case a match was found.
+         */
+        [[nodiscard]] virtual bool isById(TypeId typeId) const noexcept = 0;
+
+        /**
          * Used to invoke the _dynamic_cast from the most specialized type in the
          * dependency hierarchy by overloaded this function in each derivation of
          * RTTI::Extends<>.
@@ -256,8 +209,8 @@ namespace RTTI {
 
     inline Enable::~Enable() = default;
 
-    using refl::type_descriptor;
     using refl::reflect;
+    using refl::type_descriptor;
 }  // namespace RTTI
 
 /**
@@ -267,23 +220,23 @@ namespace RTTI {
  * @param T The type it self.
  * @param Parents Variadic number of direct parent types of the type
  */
-#define RTTI_DECLARE_TYPEINFO(T, ...)                                                \
-public:                                                                              \
-    using TypeInfo = RTTI::TypeInfo<T, ##__VA_ARGS__>;                               \
-                                                                                     \
-    [[nodiscard]] RTTI::TypeId typeId() const noexcept override {                    \
-        return TypeInfo::Id();                                                       \
-    }                                                                                \
-    [[nodiscard]] bool isById(RTTI::TypeId typeId) const noexcept override {         \
-        return TypeInfo::Is(typeId);                                                 \
-    }                                                                                \
-                                                                                     \
-protected:                                                                           \
-    [[nodiscard]] void const* _cast(RTTI::TypeId typeId) const noexcept override {   \
-        return TypeInfo::Is(typeId) ? TypeInfo::DynamicCast(typeId, this) : nullptr; \
-    }                                                                                \
-                                                                                     \
-private:                                                                             \
+#define RTTI_DECLARE_TYPEINFO(T, ...)                                              \
+public:                                                                            \
+    using TypeInfo = RTTI::TypeInfo<T, ##__VA_ARGS__>;                             \
+                                                                                   \
+    [[nodiscard]] RTTI::TypeId typeId() const noexcept override {                  \
+        return TypeInfo::Id();                                                     \
+    }                                                                              \
+                                                                                   \
+protected:                                                                         \
+    [[nodiscard]] bool isById(RTTI::TypeId typeId) const noexcept override {       \
+        return TypeInfo::Is(typeId);                                               \
+    }                                                                              \
+    [[nodiscard]] void const* _cast(RTTI::TypeId typeId) const noexcept override { \
+        return TypeInfo::DynamicCast(typeId, this);                                \
+    }                                                                              \
+                                                                                   \
+private:                                                                           \
     static_assert(true, "")
 
 /**
@@ -294,11 +247,11 @@ private:                                                                        
  * @param T The type it self.
  * @param Parents Variadic number of direct parent types of the type
  */
-#define RTTI_DECLARE_TRIVIAL(T, ...)                                                 \
-public:                                                                              \
-    using TypeInfo = RTTI::TypeInfo<T, ##__VA_ARGS__>;                               \
-                                                                                     \
-private:                                                                             \
+#define RTTI_DECLARE_TRIVIAL(T, ...)                   \
+public:                                                \
+    using TypeInfo = RTTI::TypeInfo<T, ##__VA_ARGS__>; \
+                                                       \
+private:                                               \
     static_assert(true, "")
 
-#endif // __RTTI_HH
+#endif  // !__RTTI_HH
